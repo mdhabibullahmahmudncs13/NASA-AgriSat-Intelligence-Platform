@@ -1,0 +1,2402 @@
+﻿NASA AgriSat Intelligence Platform
+Comprehensive Agricultural Monitoring System Using NASA APIs and Earth Observation Data
+Executive Summary
+AgriSat Intelligence Platform is an integrated web application that leverages NASA's Earth observation data, weather systems, and satellite imagery to provide farmers and agricultural professionals with real-time crop monitoring, weather forecasting, water management, disaster response, and precision agriculture insights. The platform combines multiple NASA datasets to deliver actionable intelligence for optimizing crop yields and managing agricultural risks.
+________________
+
+
+Table of Contents
+1. Architecture Overview
+2. Project Structure
+3. Tech Stack & Dependencies
+4. NASA APIs & Data Sources
+5. Database Design
+6. Backend Implementation
+7. Frontend Implementation
+8. Data Ingestion & Processing
+9. Local Development Setup
+10. Deployment & Production
+11. Testing Strategy
+12. Security & Performance
+13. MVP Features & Roadmap
+14. Configuration Files
+15. FAQ & Common Pitfalls
+16. Resources & References
+________________
+
+
+1. Architecture Overview
+System Architecture Diagram
+graph TB
+    subgraph "Client Layer"
+        NextJS[Next.js Frontend]
+        Mobile[Mobile App - Future]
+    end
+    
+    subgraph "API Gateway"
+        Django[Django REST API]
+        Auth[Authentication]
+    end
+    
+    subgraph "Data Processing"
+        Celery[Celery Workers]
+        Redis[Redis Cache/Queue]
+        ETL[ETL Processors]
+    end
+    
+    subgraph "Storage"
+        PG[PostgreSQL]
+        S3[AWS S3 - Images/Files]
+        LocalFS[Local Storage - Dev]
+    end
+    
+    subgraph "External APIs"
+        APOD[NASA APOD API]
+        MARS[Mars Rover Photos]
+        NEO[Near Earth Objects]
+        EARTH[Earth Imagery API]
+        POWER[NASA POWER Weather]
+        MODIS[MODIS Satellite Data]
+        LANDSAT[Landsat Imagery]
+    end
+    
+    NextJS --> Django
+    Django --> Auth
+    Django --> PG
+    Django --> Redis
+    Django --> S3
+    Django --> APOD
+    Django --> MARS
+    Django --> NEO
+    Django --> EARTH
+    Django --> POWER
+    Django --> MODIS
+    Django --> LANDSAT
+    Celery --> Redis
+    Celery --> PG
+    Celery --> S3
+    ETL --> Celery
+
+
+Data Flow Sequence
+sequenceDiagram
+    participant User
+    participant NextJS
+    participant Django
+    participant Redis
+    participant NASA_API
+    participant PostgreSQL
+    participant Celery
+
+
+    User->>NextJS: Request crop health data
+    NextJS->>Django: GET /api/fields/123/health
+    Django->>Redis: Check cache
+    alt Cache Hit
+        Redis-->>Django: Return cached data
+    else Cache Miss
+        Django->>NASA_API: Fetch satellite imagery
+        NASA_API-->>Django: Return image data
+        Django->>PostgreSQL: Store metadata
+        Django->>Redis: Cache result
+        Django->>Celery: Queue analysis job
+    end
+    Django-->>NextJS: Return field health data
+    NextJS-->>User: Display crop health dashboard
+    Celery->>PostgreSQL: Update analysis results
+
+
+________________
+
+
+2. Project Structure
+agrisat-platform/
+├── README.md
+├── docker-compose.yml
+├── .env.example
+├── .gitignore
+├── backend/
+│   ├── Dockerfile
+│   ├── requirements.txt
+│   ├── manage.py
+│   ├── agrisat/
+│   │   ├── __init__.py
+│   │   ├── settings/
+│   │   │   ├── __init__.py
+│   │   │   ├── base.py
+│   │   │   ├── development.py
+│   │   │   └── production.py
+│   │   ├── urls.py
+│   │   ├── wsgi.py
+│   │   └── celery.py
+│   ├── apps/
+│   │   ├── __init__.py
+│   │   ├── authentication/
+│   │   ├── fields/
+│   │   ├── crops/
+│   │   ├── weather/
+│   │   ├── satellites/
+│   │   ├── disasters/
+│   │   └── analytics/
+│   └── utils/
+│       ├── nasa_client.py
+│       ├── image_processing.py
+│       └── validators.py
+├── frontend/
+│   ├── Dockerfile
+│   ├── package.json
+│   ├── next.config.js
+│   ├── tailwind.config.js
+│   ├── src/
+│   │   ├── app/
+│   │   │   ├── layout.tsx
+│   │   │   ├── page.tsx
+│   │   │   ├── dashboard/
+│   │   │   ├── fields/
+│   │   │   ├── weather/
+│   │   │   └── analytics/
+│   │   ├── components/
+│   │   │   ├── ui/
+│   │   │   ├── maps/
+│   │   │   ├── charts/
+│   │   │   └── forms/
+│   │   ├── lib/
+│   │   │   ├── api.ts
+│   │   │   ├── utils.ts
+│   │   │   └── constants.ts
+│   │   └── types/
+│   │       └── index.ts
+└── infra/
+    ├── nginx/
+    ├── github-actions/
+    └── terraform/ (optional)
+
+
+________________
+
+
+3. Tech Stack & Dependencies
+Backend Dependencies (requirements.txt)
+Django==4.2.7
+djangorestframework==3.14.0
+django-cors-headers==4.3.1
+django-storages==1.14.2
+psycopg2-binary==2.9.9
+celery==5.3.4
+redis==5.0.1
+requests==2.31.0
+Pillow==10.1.0
+pandas==2.1.3
+numpy==1.25.2
+python-decouple==3.8
+django-extensions==3.2.3
+drf-spectacular==0.26.5
+
+
+Frontend Dependencies (package.json)
+{
+  "dependencies": {
+    "next": "14.0.3",
+    "react": "18.2.0",
+    "react-dom": "18.2.0",
+    "@types/node": "20.9.0",
+    "@types/react": "18.2.37",
+    "@types/react-dom": "18.2.15",
+    "typescript": "5.2.2",
+    "tailwindcss": "3.3.5",
+    "leaflet": "1.9.4",
+    "react-leaflet": "4.2.1",
+    "recharts": "2.8.0",
+    "date-fns": "2.30.0",
+    "swr": "2.2.4",
+    "framer-motion": "10.16.5"
+  }
+}
+
+
+________________
+
+
+4. NASA APIs & Data Sources
+Core Agricultural Data Sources
+4.1 Essential NASA APIs
+MODIS/Terra+Aqua Data (Vegetation Indices)
+* URL: https://modis.gsfc.nasa.gov/data/
+* Purpose: NDVI, EVI for crop health monitoring
+* Rate Limit: No key required for public data
+* Usage: Vegetation health assessment, growth stage monitoring
+NASA POWER API (Weather & Solar Data)
+* URL: https://power.larc.nasa.gov/api/
+* Purpose: Weather data, solar irradiance, temperature, precipitation
+* Rate Limit: 1000 requests/hour
+* Key Required: No
+Landsat Imagery (USGS/NASA)
+* URL: https://earthexplorer.usgs.gov/ + https://landsatlook.usgs.gov/api/
+* Purpose: High-resolution crop monitoring, field boundary detection
+* Rate Limit: Varies by service
+* Key Required: Yes (free registration)
+SMAP Soil Moisture
+* URL: https://smap.jpl.nasa.gov/data/
+* Purpose: Soil moisture monitoring for irrigation planning
+* Rate Limit: No strict limits
+* Key Required: No
+FIRMS Fire Data
+* URL: https://firms.modaps.eosdis.nasa.gov/api/
+* Purpose: Fire detection for disaster response
+* Rate Limit: 1000 requests/day
+* Key Required: Yes
+4.2 API Integration Examples
+Python Requests Example (Django Backend)
+import requests
+from django.conf import settings
+from typing import Dict, Optional
+import time
+
+
+class NASAAPIClient:
+    def __init__(self):
+        self.api_key = settings.NASA_API_KEY
+        self.base_url = "https://api.nasa.gov"
+        self.power_url = "https://power.larc.nasa.gov/api"
+    
+    def get_weather_data(self, lat: float, lon: float, 
+                        start_date: str, end_date: str) -> Dict:
+        """Fetch weather data from NASA POWER API"""
+        url = f"{self.power_url}/temporal/daily/point"
+        params = {
+            'parameters': 'T2M,PRECTOTCORR,ALLSKY_SFC_SW_DWN',
+            'community': 'AG',  # Agriculture community
+            'longitude': lon,
+            'latitude': lat,
+            'start': start_date.replace('-', ''),
+            'end': end_date.replace('-', ''),
+            'format': 'JSON'
+        }
+        
+        response = requests.get(url, params=params)
+        response.raise_for_status()
+        return response.json()
+    
+    def get_modis_ndvi(self, lat: float, lon: float, 
+                       date: str) -> Optional[Dict]:
+        """Fetch MODIS vegetation data"""
+        # Note: This would typically use NASA's Giovanni API or Earth Engine
+        url = f"{self.base_url}/planetary/earth/imagery"
+        params = {
+            'lon': lon,
+            'lat': lat,
+            'date': date,
+            'dim': 0.10,  # Image width/height in degrees
+            'api_key': self.api_key
+        }
+        
+        try:
+            response = requests.get(url, params=params, timeout=30)
+            response.raise_for_status()
+            return response.json()
+        except requests.RequestException as e:
+            print(f"Error fetching MODIS data: {e}")
+            return None
+
+
+JavaScript Fetch Example (Next.js Frontend)
+// lib/api.ts
+interface WeatherData {
+  temperature: number[];
+  precipitation: number[];
+  solarRadiation: number[];
+  dates: string[];
+}
+
+
+export async function getFieldWeather(
+  fieldId: string, 
+  startDate: string, 
+  endDate: string
+): Promise<WeatherData> {
+  const response = await fetch(
+    `/api/fields/${fieldId}/weather?start=${startDate}&end=${endDate}`,
+    {
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      next: { revalidate: 3600 } // Cache for 1 hour
+    }
+  );
+  
+  if (!response.ok) {
+    throw new Error('Failed to fetch weather data');
+  }
+  
+  return response.json();
+}
+
+
+export async function getCropHealth(fieldId: string): Promise<CropHealthData> {
+  const response = await fetch(`/api/fields/${fieldId}/health`, {
+    next: { revalidate: 86400 } // Cache for 24 hours
+  });
+  
+  if (!response.ok) {
+    throw new Error('Failed to fetch crop health data');
+  }
+  
+  return response.json();
+}
+
+
+________________
+
+
+5. Database Design
+Entity Relationship Diagram
+erDiagram
+    User ||--o{ Farm : owns
+    Farm ||--o{ Field : contains
+    Field ||--o{ CropHealth : monitors
+    Field ||--o{ WeatherData : records
+    Field ||--o{ SoilMoisture : measures
+    Field ||--o{ SatelliteImage : captures
+    Field ||--o{ Alert : generates
+    
+    User {
+        uuid id PK
+        string email
+        string name
+        datetime created_at
+        boolean is_active
+        string subscription_tier
+    }
+    
+    Farm {
+        uuid id PK
+        uuid owner_id FK
+        string name
+        text description
+        float total_area
+        jsonb boundaries
+        datetime created_at
+    }
+    
+    Field {
+        uuid id PK
+        uuid farm_id FK
+        string name
+        string crop_type
+        float area_hectares
+        jsonb polygon_coordinates
+        date planting_date
+        date expected_harvest
+        string growth_stage
+        datetime created_at
+    }
+    
+    CropHealth {
+        uuid id PK
+        uuid field_id FK
+        float ndvi_value
+        float evi_value
+        float health_score
+        string status
+        text analysis_notes
+        datetime measured_at
+        string data_source
+    }
+    
+    WeatherData {
+        uuid id PK
+        uuid field_id FK
+        float temperature_min
+        float temperature_max
+        float precipitation
+        float humidity
+        float wind_speed
+        float solar_radiation
+        date weather_date
+        string data_source
+    }
+    
+    SoilMoisture {
+        uuid id PK
+        uuid field_id FK
+        float moisture_percentage
+        integer depth_cm
+        datetime measured_at
+        string satellite_source
+    }
+    
+    SatelliteImage {
+        uuid id PK
+        uuid field_id FK
+        string image_url
+        string thumbnail_url
+        string satellite_source
+        datetime captured_at
+        jsonb metadata
+        string processing_status
+    }
+    
+    Alert {
+        uuid id PK
+        uuid field_id FK
+        string alert_type
+        string severity
+        string title
+        text description
+        boolean is_resolved
+        datetime created_at
+        datetime resolved_at
+    }
+
+
+________________
+
+
+6. Backend Implementation
+6.1 Django Settings Configuration
+settings/base.py
+import os
+from decouple import config
+from pathlib import Path
+
+
+BASE_DIR = Path(__file__).resolve().parent.parent.parent
+
+
+SECRET_KEY = config('SECRET_KEY')
+DEBUG = config('DEBUG', default=False, cast=bool)
+
+
+ALLOWED_HOSTS = config('ALLOWED_HOSTS', default='localhost').split(',')
+
+
+# Application definition
+DJANGO_APPS = [
+    'django.contrib.admin',
+    'django.contrib.auth',
+    'django.contrib.contenttypes',
+    'django.contrib.sessions',
+    'django.contrib.messages',
+    'django.contrib.staticfiles',
+    'django.contrib.gis',  # For geographic data
+]
+
+
+THIRD_PARTY_APPS = [
+    'rest_framework',
+    'corsheaders',
+    'storages',
+    'drf_spectacular',
+]
+
+
+LOCAL_APPS = [
+    'apps.authentication',
+    'apps.fields',
+    'apps.crops',
+    'apps.weather',
+    'apps.satellites',
+    'apps.disasters',
+    'apps.analytics',
+]
+
+
+INSTALLED_APPS = DJANGO_APPS + THIRD_PARTY_APPS + LOCAL_APPS
+
+
+MIDDLEWARE = [
+    'corsheaders.middleware.CorsMiddleware',
+    'django.middleware.security.SecurityMiddleware',
+    'django.contrib.sessions.middleware.SessionMiddleware',
+    'django.middleware.common.CommonMiddleware',
+    'django.middleware.csrf.CsrfViewMiddleware',
+    'django.contrib.auth.middleware.AuthenticationMiddleware',
+    'django.contrib.messages.middleware.MessageMiddleware',
+    'django.middleware.clickjacking.XFrameOptionsMiddleware',
+]
+
+
+ROOT_URLCONF = 'agrisat.urls'
+
+
+# Database
+DATABASES = {
+    'default': {
+        'ENGINE': 'django.contrib.gis.db.backends.postgis',
+        'NAME': config('DB_NAME'),
+        'USER': config('DB_USER'),
+        'PASSWORD': config('DB_PASSWORD'),
+        'HOST': config('DB_HOST', default='localhost'),
+        'PORT': config('DB_PORT', default='5432'),
+    }
+}
+
+
+# NASA API Configuration
+NASA_API_KEY = config('NASA_API_KEY')
+NASA_API_BASE_URL = 'https://api.nasa.gov'
+NASA_POWER_BASE_URL = 'https://power.larc.nasa.gov/api'
+
+
+# Celery Configuration
+CELERY_BROKER_URL = config('REDIS_URL', default='redis://localhost:6379/0')
+CELERY_RESULT_BACKEND = config('REDIS_URL', default='redis://localhost:6379/0')
+CELERY_ACCEPT_CONTENT = ['json']
+CELERY_TASK_SERIALIZER = 'json'
+CELERY_RESULT_SERIALIZER = 'json'
+CELERY_TIMEZONE = 'UTC'
+
+
+# REST Framework
+REST_FRAMEWORK = {
+    'DEFAULT_AUTHENTICATION_CLASSES': [
+        'rest_framework.authentication.SessionAuthentication',
+        'rest_framework.authentication.TokenAuthentication',
+    ],
+    'DEFAULT_PERMISSION_CLASSES': [
+        'rest_framework.permissions.IsAuthenticated',
+    ],
+    'DEFAULT_THROTTLE_CLASSES': [
+        'rest_framework.throttling.AnonRateThrottle',
+        'rest_framework.throttling.UserRateThrottle'
+    ],
+    'DEFAULT_THROTTLE_RATES': {
+        'anon': '100/hour',
+        'user': '1000/hour'
+    },
+    'DEFAULT_SCHEMA_CLASS': 'drf_spectacular.openapi.AutoSchema',
+}
+
+
+# Caching
+CACHES = {
+    'default': {
+        'BACKEND': 'django_redis.cache.RedisCache',
+        'LOCATION': config('REDIS_URL', default='redis://localhost:6379/1'),
+        'OPTIONS': {
+            'CLIENT_CLASS': 'django_redis.client.DefaultClient',
+        }
+    }
+}
+
+
+6.2 Django Models
+apps/fields/models.py
+from django.contrib.gis.db import models
+from django.contrib.auth.models import User
+from django.core.validators import MinValueValidator, MaxValueValidator
+import uuid
+
+
+class Farm(models.Model):
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    owner = models.ForeignKey(User, on_delete=models.CASCADE, related_name='farms')
+    name = models.CharField(max_length=200)
+    description = models.TextField(blank=True)
+    total_area = models.FloatField(help_text="Total area in hectares")
+    boundaries = models.PolygonField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    
+    class Meta:
+        db_table = 'farms'
+        indexes = [
+            models.Index(fields=['owner', 'created_at']),
+        ]
+
+
+class Field(models.Model):
+    CROP_CHOICES = [
+        ('wheat', 'Wheat'),
+        ('corn', 'Corn'),
+        ('rice', 'Rice'),
+        ('soybean', 'Soybean'),
+        ('cotton', 'Cotton'),
+        ('barley', 'Barley'),
+        ('other', 'Other'),
+    ]
+    
+    GROWTH_STAGES = [
+        ('germination', 'Germination'),
+        ('vegetative', 'Vegetative'),
+        ('reproductive', 'Reproductive'),
+        ('maturation', 'Maturation'),
+        ('harvest', 'Harvest'),
+    ]
+    
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    farm = models.ForeignKey(Farm, on_delete=models.CASCADE, related_name='fields')
+    name = models.CharField(max_length=200)
+    crop_type = models.CharField(max_length=50, choices=CROP_CHOICES)
+    area_hectares = models.FloatField(validators=[MinValueValidator(0.01)])
+    polygon_coordinates = models.PolygonField()
+    planting_date = models.DateField(null=True, blank=True)
+    expected_harvest = models.DateField(null=True, blank=True)
+    growth_stage = models.CharField(max_length=50, choices=GROWTH_STAGES, default='germination')
+    created_at = models.DateTimeField(auto_now_add=True)
+    
+    class Meta:
+        db_table = 'fields'
+        indexes = [
+            models.Index(fields=['farm', 'crop_type']),
+            models.Index(fields=['planting_date']),
+        ]
+
+
+class CropHealth(models.Model):
+    HEALTH_STATUS = [
+        ('excellent', 'Excellent'),
+        ('good', 'Good'),
+        ('fair', 'Fair'),
+        ('poor', 'Poor'),
+        ('critical', 'Critical'),
+    ]
+    
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    field = models.ForeignKey(Field, on_delete=models.CASCADE, related_name='health_data')
+    ndvi_value = models.FloatField(validators=[MinValueValidator(-1), MaxValueValidator(1)])
+    evi_value = models.FloatField(null=True, blank=True)
+    health_score = models.FloatField(validators=[MinValueValidator(0), MaxValueValidator(100)])
+    status = models.CharField(max_length=20, choices=HEALTH_STATUS)
+    analysis_notes = models.TextField(blank=True)
+    measured_at = models.DateTimeField()
+    data_source = models.CharField(max_length=100)  # e.g., 'MODIS', 'Landsat'
+    
+    class Meta:
+        db_table = 'crop_health'
+        indexes = [
+            models.Index(fields=['field', 'measured_at']),
+            models.Index(fields=['status', 'measured_at']),
+        ]
+        unique_together = ['field', 'measured_at', 'data_source']
+
+
+6.3 Django REST Framework Implementation
+apps/fields/serializers.py
+from rest_framework import serializers
+from rest_framework_gis.serializers import GeoFeatureModelSerializer
+from .models import Farm, Field, CropHealth
+
+
+class CropHealthSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = CropHealth
+        fields = '__all__'
+        read_only_fields = ('id', 'measured_at')
+
+
+class FieldSerializer(GeoFeatureModelSerializer):
+    current_health = serializers.SerializerMethodField()
+    health_trend = serializers.SerializerMethodField()
+    
+    class Meta:
+        model = Field
+        geo_field = 'polygon_coordinates'
+        fields = ('id', 'name', 'crop_type', 'area_hectares', 'planting_date', 
+                 'expected_harvest', 'growth_stage', 'current_health', 'health_trend')
+    
+    def get_current_health(self, obj):
+        latest_health = obj.health_data.order_by('-measured_at').first()
+        return CropHealthSerializer(latest_health).data if latest_health else None
+    
+    def get_health_trend(self, obj):
+        # Calculate 7-day health trend
+        recent_data = obj.health_data.order_by('-measured_at')[:7]
+        if len(recent_data) >= 2:
+            current = recent_data[0].health_score
+            previous = recent_data[-1].health_score
+            return round(current - previous, 2)
+        return 0
+
+
+class FarmSerializer(serializers.ModelSerializer):
+    fields_count = serializers.SerializerMethodField()
+    average_health = serializers.SerializerMethodField()
+    
+    class Meta:
+        model = Farm
+        fields = ('id', 'name', 'description', 'total_area', 'fields_count', 'average_health')
+    
+    def get_fields_count(self, obj):
+        return obj.fields.count()
+    
+    def get_average_health(self, obj):
+        from django.db.models import Avg
+        avg_health = obj.fields.aggregate(
+            avg_health=Avg('health_data__health_score')
+        )['avg_health']
+        return round(avg_health, 2) if avg_health else 0
+
+
+apps/fields/views.py
+from rest_framework import viewsets, status
+from rest_framework.decorators import action
+from rest_framework.response import Response
+from django.utils import timezone
+from datetime import timedelta
+from .models import Farm, Field, CropHealth
+from .serializers import FarmSerializer, FieldSerializer, CropHealthSerializer
+from utils.nasa_client import NASAAPIClient
+
+
+class FieldViewSet(viewsets.ModelViewSet):
+    serializer_class = FieldSerializer
+    
+    def get_queryset(self):
+        return Field.objects.filter(farm__owner=self.request.user)
+    
+    @action(detail=True, methods=['get'])
+    def health(self, request, pk=None):
+        """Get current crop health status for a field"""
+        field = self.get_object()
+        
+        # Get latest health data
+        latest_health = field.health_data.order_by('-measured_at').first()
+        
+        if not latest_health or latest_health.measured_at < timezone.now() - timedelta(days=7):
+            # Trigger background task to fetch fresh data
+            from .tasks import update_field_health
+            update_field_health.delay(str(field.id))
+        
+        # Get health trend (last 30 days)
+        thirty_days_ago = timezone.now() - timedelta(days=30)
+        health_history = field.health_data.filter(
+            measured_at__gte=thirty_days_ago
+        ).order_by('measured_at')
+        
+        return Response({
+            'current_health': CropHealthSerializer(latest_health).data if latest_health else None,
+            'health_history': CropHealthSerializer(health_history, many=True).data,
+            'recommendations': self._generate_recommendations(field, latest_health)
+        })
+    
+    @action(detail=True, methods=['get'])
+    def weather(self, request, pk=None):
+        """Get weather data and forecast for a field"""
+        field = self.get_object()
+        start_date = request.query_params.get('start', 
+            (timezone.now() - timedelta(days=7)).strftime('%Y-%m-%d'))
+        end_date = request.query_params.get('end', 
+            timezone.now().strftime('%Y-%m-%d'))
+        
+        # Get centroid of field for weather data
+        centroid = field.polygon_coordinates.centroid
+        
+        nasa_client = NASAAPIClient()
+        weather_data = nasa_client.get_weather_data(
+            lat=centroid.y, 
+            lon=centroid.x, 
+            start_date=start_date, 
+            end_date=end_date
+        )
+        
+        return Response(weather_data)
+    
+    def _generate_recommendations(self, field, health_data):
+        """Generate actionable recommendations based on crop health"""
+        recommendations = []
+        
+        if health_data:
+            if health_data.health_score < 50:
+                recommendations.append({
+                    'type': 'warning',
+                    'title': 'Poor Crop Health Detected',
+                    'description': 'Consider soil testing and nutrient analysis',
+                    'priority': 'high'
+                })
+            
+            if health_data.ndvi_value < 0.3:
+                recommendations.append({
+                    'type': 'action',
+                    'title': 'Low Vegetation Index',
+                    'description': 'Irrigation or fertilization may be needed',
+                    'priority': 'medium'
+                })
+        
+        return recommendations
+
+
+6.4 Background Tasks with Celery
+apps/fields/tasks.py
+from celery import shared_task
+from django.utils import timezone
+from .models import Field, CropHealth
+from utils.nasa_client import NASAAPIClient
+from utils.image_processing import calculate_vegetation_indices
+import logging
+
+
+logger = logging.getLogger(__name__)
+
+
+@shared_task(bind=True, max_retries=3)
+def update_field_health(self, field_id):
+    """Update crop health data for a specific field"""
+    try:
+        field = Field.objects.get(id=field_id)
+        centroid = field.polygon_coordinates.centroid
+        
+        nasa_client = NASAAPIClient()
+        
+        # Get latest satellite imagery
+        today = timezone.now().date()
+        image_data = nasa_client.get_landsat_imagery(
+            lat=centroid.y,
+            lon=centroid.x,
+            date=today.strftime('%Y-%m-%d')
+        )
+        
+        if image_data:
+            # Calculate vegetation indices
+            ndvi, evi = calculate_vegetation_indices(image_data)
+            
+            # Calculate health score (simplified algorithm)
+            health_score = min(100, max(0, (ndvi + 1) * 50))
+            
+            # Determine status
+            if health_score >= 80:
+                status = 'excellent'
+            elif health_score >= 60:
+                status = 'good'
+            elif health_score >= 40:
+                status = 'fair'
+            elif health_score >= 20:
+                status = 'poor'
+            else:
+                status = 'critical'
+            
+            # Create health record
+            CropHealth.objects.create(
+                field=field,
+                ndvi_value=ndvi,
+                evi_value=evi,
+                health_score=health_score,
+                status=status,
+                measured_at=timezone.now(),
+                data_source='Landsat-8'
+            )
+            
+            logger.info(f"Updated health data for field {field.name}")
+            
+    except Exception as exc:
+        logger.error(f"Error updating field health: {exc}")
+        raise self.retry(exc=exc, countdown=60 * (self.request.retries + 1))
+
+
+@shared_task
+def daily_health_update():
+    """Daily task to update all active fields"""
+    active_fields = Field.objects.filter(
+        growth_stage__in=['germination', 'vegetative', 'reproductive']
+    )
+    
+    for field in active_fields:
+        update_field_health.delay(str(field.id))
+
+
+@shared_task
+def weather_forecast_update():
+    """Update weather forecasts for all farms"""
+    from apps.weather.models import WeatherData
+    from datetime import datetime, timedelta
+    
+    farms = Farm.objects.all()
+    nasa_client = NASAAPIClient()
+    
+    for farm in farms:
+        if farm.boundaries:
+            centroid = farm.boundaries.centroid
+            
+            # Get 7-day forecast
+            start_date = datetime.now().date()
+            end_date = start_date + timedelta(days=7)
+            
+            weather_data = nasa_client.get_weather_data(
+                lat=centroid.y,
+                lon=centroid.x,
+                start_date=start_date.strftime('%Y-%m-%d'),
+                end_date=end_date.strftime('%Y-%m-%d')
+            )
+            
+            # Store weather data for each field in the farm
+            for field in farm.fields.all():
+                # Process and store weather data
+                pass  # Implementation would parse NASA POWER response
+
+
+6.5 NASA API Integration Utility
+utils/nasa_client.py
+import requests
+import time
+from django.conf import settings
+from django.core.cache import cache
+from typing import Dict, Optional, List
+import logging
+
+
+logger = logging.getLogger(__name__)
+
+
+class NASAAPIClient:
+    def __init__(self):
+        self.api_key = settings.NASA_API_KEY
+        self.base_url = settings.NASA_API_BASE_URL
+        self.power_url = settings.NASA_POWER_BASE_URL
+        self.session = requests.Session()
+        self.session.headers.update({'User-Agent': 'AgriSat-Platform/1.0'})
+    
+    def _make_request(self, url: str, params: Dict, cache_key: str = None, 
+                     cache_timeout: int = 3600) -> Optional[Dict]:
+        """Make request with caching and rate limiting"""
+        
+        # Check cache first
+        if cache_key:
+            cached_data = cache.get(cache_key)
+            if cached_data:
+                return cached_data
+        
+        try:
+            # Add API key if needed
+            if 'api.nasa.gov' in url:
+                params['api_key'] = self.api_key
+            
+            response = self.session.get(url, params=params, timeout=30)
+            response.raise_for_status()
+            
+            data = response.json()
+            
+            # Cache successful response
+            if cache_key:
+                cache.set(cache_key, data, cache_timeout)
+            
+            return data
+            
+        except requests.RequestException as e:
+            logger.error(f"NASA API request failed: {e}")
+            return None
+    
+    def get_weather_data(self, lat: float, lon: float, 
+                        start_date: str, end_date: str) -> Dict:
+        """Fetch agricultural weather data from NASA POWER"""
+        url = f"{self.power_url}/temporal/daily/point"
+        params = {
+            'parameters': 'T2M_MIN,T2M_MAX,PRECTOTCORR,RH2M,WS2M,ALLSKY_SFC_SW_DWN',
+            'community': 'AG',
+            'longitude': lon,
+            'latitude': lat,
+            'start': start_date.replace('-', ''),
+            'end': end_date.replace('-', ''),
+            'format': 'JSON'
+        }
+        
+        cache_key = f"weather_{lat}_{lon}_{start_date}_{end_date}"
+        return self._make_request(url, params, cache_key, cache_timeout=1800)
+    
+    def get_soil_moisture(self, lat: float, lon: float, date: str) -> Optional[Dict]:
+        """Fetch SMAP soil moisture data"""
+        # Note: This is a simplified example - SMAP data typically requires 
+        # more complex processing through NASA Earthdata
+        cache_key = f"soil_moisture_{lat}_{lon}_{date}"
+        
+        # Placeholder for SMAP API integration
+        # In reality, you'd use NASA Earthdata APIs or process SMAP HDF5 files
+        return {
+            'soil_moisture': 0.25,  # Example value
+            'date': date,
+            'lat': lat,
+            'lon': lon,
+            'source': 'SMAP'
+        }
+    
+    def get_earth_imagery(self, lat: float, lon: float, date: str, 
+                         dim: float = 0.10) -> Optional[Dict]:
+        """Get Earth imagery for vegetation analysis"""
+        url = f"{self.base_url}/planetary/earth/imagery"
+        params = {
+            'lon': lon,
+            'lat': lat,
+            'date': date,
+            'dim': dim,
+        }
+        
+        cache_key = f"earth_imagery_{lat}_{lon}_{date}_{dim}"
+        return self._make_request(url, params, cache_key, cache_timeout=86400)
+
+
+________________
+
+
+7. Frontend Implementation
+7.1 Next.js App Router Structure
+src/app/layout.tsx
+import type { Metadata } from 'next'
+import { Inter } from 'next/font/google'
+import './globals.css'
+import { Navigation } from '@/components/ui/Navigation'
+
+
+const inter = Inter({ subsets: ['latin'] })
+
+
+export const metadata: Metadata = {
+  title: 'AgriSat Intelligence Platform',
+  description: 'NASA-powered agricultural monitoring and intelligence',
+}
+
+
+export default function RootLayout({
+  children,
+}: {
+  children: React.ReactNode
+}) {
+  return (
+    <html lang="en">
+      <body className={inter.className}>
+        <div className="min-h-screen bg-gray-50">
+          <Navigation />
+          <main className="container mx-auto px-4 py-8">
+            {children}
+          </main>
+        </div>
+      </body>
+    </html>
+  )
+}
+
+
+src/app/dashboard/page.tsx
+import { Suspense } from 'react'
+import { FarmOverview } from '@/components/dashboard/FarmOverview'
+import { WeatherWidget } from '@/components/weather/WeatherWidget'
+import { AlertsPanel } from '@/components/alerts/AlertsPanel'
+import { CropHealthSummary } from '@/components/crops/CropHealthSummary'
+
+
+export default function DashboardPage() {
+  return (
+    <div className="space-y-6">
+      <h1 className="text-3xl font-bold text-gray-900">Farm Dashboard</h1>
+      
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        <div className="lg:col-span-2 space-y-6">
+          <Suspense fallback={<div>Loading farm overview...</div>}>
+            <FarmOverview />
+          </Suspense>
+          
+          <Suspense fallback={<div>Loading crop health...</div>}>
+            <CropHealthSummary />
+          </Suspense>
+        </div>
+        
+        <div className="space-y-6">
+          <Suspense fallback={<div>Loading weather...</div>}>
+            <WeatherWidget />
+          </Suspense>
+          
+          <Suspense fallback={<div>Loading alerts...</div>}>
+            <AlertsPanel />
+          </Suspense>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+
+7.2 Key React Components
+components/maps/FieldMap.tsx
+'use client'
+import { useEffect, useState } from 'react'
+import { MapContainer, TileLayer, Polygon, Popup } from 'react-leaflet'
+import { LatLngExpression } from 'leaflet'
+import 'leaflet/dist/leaflet.css'
+
+
+interface Field {
+  id: string
+  name: string
+  crop_type: string
+  polygon_coordinates: number[][]
+  current_health?: {
+    health_score: number
+    status: string
+    ndvi_value: number
+  }
+}
+
+
+interface FieldMapProps {
+  fields: Field[]
+  center?: [number, number]
+  zoom?: number
+}
+
+
+export function FieldMap({ fields, center = [40.7128, -74.0060], zoom = 10 }: FieldMapProps) {
+  const [mounted, setMounted] = useState(false)
+  
+  useEffect(() => {
+    setMounted(true)
+  }, [])
+  
+  if (!mounted) return <div>Loading map...</div>
+  
+  const getFieldColor = (healthScore?: number) => {
+    if (!healthScore) return '#gray'
+    if (healthScore >= 80) return '#22c55e' // green
+    if (healthScore >= 60) return '#eab308' // yellow
+    if (healthScore >= 40) return '#f97316' // orange
+    return '#ef4444' // red
+  }
+  
+  return (
+    <MapContainer 
+      center={center} 
+      zoom={zoom} 
+      style={{ height: '500px', width: '100%' }}
+      className="rounded-lg"
+    >
+      <TileLayer
+        attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
+        url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+      />
+      
+      {fields.map((field) => {
+        const coordinates: LatLngExpression[] = field.polygon_coordinates.map(
+          ([lat, lng]) => [lat, lng] as LatLngExpression
+        )
+        
+        return (
+          <Polygon
+            key={field.id}
+            positions={coordinates}
+            pathOptions={{
+              color: getFieldColor(field.current_health?.health_score),
+              weight: 2,
+              opacity: 0.8,
+              fillOpacity: 0.3,
+            }}
+          >
+            <Popup>
+              <div className="p-2">
+                <h3 className="font-semibold">{field.name}</h3>
+                <p>Crop: {field.crop_type}</p>
+                {field.current_health && (
+                  <>
+                    <p>Health Score: {field.current_health.health_score}%</p>
+                    <p>Status: {field.current_health.status}</p>
+                    <p>NDVI: {field.current_health.ndvi_value.toFixed(3)}</p>
+                  </>
+                )}
+              </div>
+            </Popup>
+          </Polygon>
+        )
+      })}
+    </MapContainer>
+  )
+}
+
+
+components/charts/HealthTrendChart.tsx
+'use client'
+import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts'
+import { format, parseISO } from 'date-fns'
+
+
+interface HealthData {
+  measured_at: string
+  health_score: number
+  ndvi_value: number
+  status: string
+}
+
+
+interface HealthTrendChartProps {
+  data: HealthData[]
+  title?: string
+}
+
+
+export function HealthTrendChart({ data, title = 'Crop Health Trend' }: HealthTrendChartProps) {
+  const chartData = data.map(item => ({
+    date: format(parseISO(item.measured_at), 'MMM dd'),
+    health_score: item.health_score,
+    ndvi: item.ndvi_value * 100, // Scale NDVI for better visualization
+    status: item.status
+  }))
+  
+  return (
+    <div className="bg-white p-6 rounded-lg shadow">
+      <h3 className="text-lg font-semibold mb-4">{title}</h3>
+      <ResponsiveContainer width="100%" height={300}>
+        <LineChart data={chartData}>
+          <CartesianGrid strokeDasharray="3 3" />
+          <XAxis dataKey="date" />
+          <YAxis />
+          <Tooltip 
+            formatter={(value, name) => [
+              name === 'ndvi' ? `${(value as number / 100).toFixed(3)}` : `${value}%`,
+              name === 'ndvi' ? 'NDVI' : 'Health Score'
+            ]}
+          />
+          <Legend />
+          <Line 
+            type="monotone" 
+            dataKey="health_score" 
+            stroke="#22c55e" 
+            strokeWidth={2}
+            name="Health Score"
+          />
+          <Line 
+            type="monotone" 
+            dataKey="ndvi" 
+            stroke="#3b82f6" 
+            strokeWidth={2}
+            name="NDVI"
+          />
+        </LineChart>
+      </ResponsiveContainer>
+    </div>
+  )
+}
+
+
+________________
+
+
+8. Data Ingestion & Processing
+8.1 Django Management Commands
+apps/satellites/management/commands/ingest_modis_data.py
+from django.core.management.base import BaseCommand
+from django.utils import timezone
+from datetime import datetime, timedelta
+import pandas as pd
+import requests
+from apps.fields.models import Field, CropHealth
+from utils.nasa_client import NASAAPIClient
+
+
+class Command(BaseCommand):
+    help = 'Ingest MODIS vegetation data for all fields'
+    
+    def add_arguments(self, parser):
+        parser.add_argument(
+            '--days',
+            type=int,
+            default=7,
+            help='Number of days to fetch data for'
+        )
+        parser.add_argument(
+            '--field-id',
+            type=str,
+            help='Specific field ID to process'
+        )
+    
+    def handle(self, *args, **options):
+        days = options['days']
+        field_id = options.get('field_id')
+        
+        # Get fields to process
+        if field_id:
+            fields = Field.objects.filter(id=field_id)
+        else:
+            fields = Field.objects.filter(
+                growth_stage__in=['vegetative', 'reproductive']
+            )
+        
+        nasa_client = NASAAPIClient()
+        
+        self.stdout.write(f"Processing {fields.count()} fields for {days} days")
+        
+        for field in fields:
+            self.stdout.write(f"Processing field: {field.name}")
+            
+            try:
+                self._process_field_vegetation(field, nasa_client, days)
+                self.stdout.write(
+                    self.style.SUCCESS(f"✓ Completed {field.name}")
+                )
+            except Exception as e:
+                self.stdout.write(
+                    self.style.ERROR(f"✗ Error processing {field.name}: {e}")
+                )
+    
+    def _process_field_vegetation(self, field, nasa_client, days):
+        """Process vegetation data for a single field"""
+        centroid = field.polygon_coordinates.centroid
+        end_date = timezone.now().date()
+        start_date = end_date - timedelta(days=days)
+        
+        # Fetch vegetation data (simplified - would use actual MODIS API)
+        for i in range(days):
+            current_date = start_date + timedelta(days=i)
+            
+            # Check if we already have data for this date
+            existing = CropHealth.objects.filter(
+                field=field,
+                measured_at__date=current_date,
+                data_source='MODIS'
+            ).first()
+            
+            if existing:
+                continue
+            
+            # Simulate MODIS data fetch (replace with actual API call)
+            vegetation_data = self._fetch_modis_vegetation(
+                centroid.y, centroid.x, current_date.strftime('%Y-%m-%d')
+            )
+            
+            if vegetation_data:
+                CropHealth.objects.create(
+                    field=field,
+                    ndvi_value=vegetation_data.get('ndvi', 0),
+                    evi_value=vegetation_data.get('evi', 0),
+                    health_score=vegetation_data.get('health_score', 0),
+                    status=vegetation_data.get('status', 'unknown'),
+                    measured_at=timezone.make_aware(
+                        datetime.combine(current_date, datetime.min.time())
+                    ),
+                    data_source='MODIS'
+                )
+    
+    def _fetch_modis_vegetation(self, lat, lon, date):
+        """Fetch MODIS vegetation indices (placeholder implementation)"""
+        # This would integrate with actual MODIS data sources
+        # For MVP, we'll simulate realistic data
+        import random
+        
+        # Simulate seasonal variation
+        day_of_year = datetime.strptime(date, '%Y-%m-%d').timetuple().tm_yday
+        base_ndvi = 0.3 + 0.4 * abs(math.sin(2 * math.pi * day_of_year / 365))
+        
+        ndvi = base_ndvi + random.uniform(-0.1, 0.1)
+        evi = ndvi * 0.8 + random.uniform(-0.05, 0.05)
+        health_score = min(100, max(0, (ndvi + 1) * 50))
+        
+        if health_score >= 80:
+            status = 'excellent'
+        elif health_score >= 60:
+            status = 'good'
+        elif health_score >= 40:
+            status = 'fair'
+        else:
+            status = 'poor'
+        
+        return {
+            'ndvi': ndvi,
+            'evi': evi,
+            'health_score': health_score,
+            'status': status
+        }
+
+
+8.2 Large Dataset Processing
+apps/analytics/management/commands/process_climate_data.py
+from django.core.management.base import BaseCommand
+import pandas as pd
+import numpy as np
+from apps.weather.models import ClimateData, WeatherStation
+from celery import group
+import requests
+import io
+
+
+class Command(BaseCommand):
+    help = 'Process large climate datasets from NASA'
+    
+    def add_arguments(self, parser):
+        parser.add_argument(
+            '--dataset-url',
+            type=str,
+            required=True,
+            help='URL to NASA climate dataset (CSV/NetCDF)'
+        )
+        parser.add_argument(
+            '--chunk-size',
+            type=int,
+            default=10000,
+            help='Number of records to process in each chunk'
+        )
+    
+    def handle(self, *args, **options):
+        dataset_url = options['dataset_url']
+        chunk_size = options['chunk_size']
+        
+        self.stdout.write(f"Downloading dataset from: {dataset_url}")
+        
+        # Download dataset
+        response = requests.get(dataset_url, stream=True)
+        response.raise_for_status()
+        
+        # Read CSV in chunks
+        csv_data = io.StringIO(response.text)
+        
+        # Process data in chunks using Celery
+        chunk_jobs = []
+        
+        for chunk_df in pd.read_csv(csv_data, chunksize=chunk_size):
+            # Convert chunk to dict for serialization
+            chunk_data = chunk_df.to_dict('records')
+            
+            # Queue processing job
+            from .tasks import process_climate_chunk
+            job = process_climate_chunk.delay(chunk_data)
+            chunk_jobs.append(job)
+        
+        self.stdout.write(f"Queued {len(chunk_jobs)} processing jobs")
+        
+        # Optionally wait for completion
+        if options.get('wait'):
+            for job in chunk_jobs:
+                job.get()  # Wait for completion
+            
+            self.stdout.write(
+                self.style.SUCCESS("All chunks processed successfully")
+            )
+
+
+________________
+
+
+9. Local Development Setup
+9.1 Initial Setup Commands
+# Clone repository
+git clone https://github.com/your-org/agrisat-platform.git
+cd agrisat-platform
+
+
+# Copy environment template
+cp .env.example .env
+
+
+# Edit .env with your NASA API key and database credentials
+# NASA_API_KEY=your_nasa_api_key_here
+# DB_PASSWORD=your_secure_password
+
+
+# Build and start all services
+docker-compose up --build
+
+
+# In a new terminal, run initial migrations
+docker-compose exec backend python manage.py migrate
+
+
+# Create superuser
+docker-compose exec backend python manage.py createsuperuser
+
+
+# Load sample data
+docker-compose exec backend python manage.py loaddata fixtures/sample_farms.json
+
+
+# Test API endpoints
+curl http://localhost:8000/api/farms/
+
+
+9.2 Development Workflow
+# Start development environment
+docker-compose up
+
+
+# Run backend tests
+docker-compose exec backend python manage.py test
+
+
+# Run frontend development server (with hot reload)
+docker-compose exec frontend npm run dev
+
+
+# Run Celery worker for background tasks
+docker-compose exec backend celery -A agrisat worker --loglevel=info
+
+
+# Run scheduled tasks
+docker-compose exec backend celery -A agrisat beat --loglevel=info
+
+
+# Access services:
+# Frontend: http://localhost:3000
+# Backend API: http://localhost:8000/api/
+# Django Admin: http://localhost:8000/admin/
+# PostgreSQL: localhost:5432
+# Redis: localhost:6379
+
+
+________________
+
+
+10. Deployment & Production
+10.1 GitHub Actions Workflow
+.github/workflows/deploy.yml
+name: Deploy AgriSat Platform
+
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+
+jobs:
+  test-backend:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgis/postgis:14-3.2
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: test_agrisat
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    
+    steps:
+    - uses: actions/checkout@v3
+    
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.11'
+    
+    - name: Install dependencies
+      run: |
+        cd backend
+        pip install -r requirements.txt
+    
+    - name: Run tests
+      env:
+        DATABASE_URL: postgres://postgres:postgres@localhost:5432/test_agrisat
+        SECRET_KEY: test-secret-key
+        NASA_API_KEY: ${{ secrets.NASA_API_KEY }}
+      run: |
+        cd backend
+        python manage.py test
+  
+  test-frontend:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - uses: actions/checkout@v3
+    
+    - name: Setup Node.js
+      uses: actions/setup-node@v3
+      with:
+        node-version: '18'
+        cache: 'npm'
+        cache-dependency-path: frontend/package-lock.json
+    
+    - name: Install dependencies
+      run: |
+        cd frontend
+        npm ci
+    
+    - name: Run tests
+      run: |
+        cd frontend
+        npm run test
+    
+    - name: Build application
+      run: |
+        cd frontend
+        npm run build
+  
+  deploy:
+    needs: [test-backend, test-frontend]
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main'
+    
+    steps:
+    - uses: actions/checkout@v3
+    
+    - name: Deploy to production
+      env:
+        DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+        DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+        DEPLOY_KEY: ${{ secrets.DEPLOY_KEY }}
+      run: |
+        # Add your deployment script here
+        echo "Deploying to production..."
+
+
+________________
+
+
+11. Testing Strategy
+11.1 Backend Tests
+apps/fields/tests/test_views.py
+from django.test import TestCase
+from django.contrib.auth.models import User
+from rest_framework.test import APIClient
+from rest_framework import status
+from apps.fields.models import Farm, Field
+from unittest.mock import patch, MagicMock
+
+
+class FieldHealthAPITestCase(TestCase):
+    def setUp(self):
+        self.user = User.objects.create_user(
+            username='testuser',
+            email='test@example.com',
+            password='testpass123'
+        )
+        self.client = APIClient()
+        self.client.force_authenticate(user=self.user)
+        
+        self.farm = Farm.objects.create(
+            owner=self.user,
+            name='Test Farm',
+            total_area=100.0
+        )
+        
+        self.field = Field.objects.create(
+            farm=self.farm,
+            name='Test Field',
+            crop_type='wheat',
+            area_hectares=10.0,
+            polygon_coordinates='POLYGON((0 0, 1 0, 1 1, 0 1, 0 0))'
+        )
+    
+    @patch('utils.nasa_client.NASAAPIClient.get_weather_data')
+    def test_field_weather_endpoint(self, mock_weather):
+        """Test weather data retrieval for a field"""
+        mock_weather.return_value = {
+            'properties': {
+                'parameter': {
+                    'T2M_MIN': {'20241201': 15.5},
+                    'T2M_MAX': {'20241201': 25.3},
+                    'PRECTOTCORR': {'20241201': 2.1}
+                }
+            }
+        }
+        
+        response = self.client.get(f'/api/fields/{self.field.id}/weather/')
+        
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertIn('properties', response.json())
+        mock_weather.assert_called_once()
+    
+    def test_field_health_calculation(self):
+        """Test crop health score calculation"""
+        from apps.fields.models import CropHealth
+        
+        health = CropHealth.objects.create(
+            field=self.field,
+            ndvi_value=0.7,
+            evi_value=0.6,
+            health_score=85.0,
+            status='excellent',
+            measured_at=timezone.now(),
+            data_source='test'
+        )
+        
+        response = self.client.get(f'/api/fields/{self.field.id}/health/')
+        
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        data = response.json()
+        self.assertEqual(data['current_health']['health_score'], 85.0)
+        self.assertEqual(data['current_health']['status'], 'excellent')
+
+
+11.2 Frontend Tests
+components/tests/FieldMap.test.tsx
+import { render, screen } from '@testing-library/react'
+import { FieldMap } from '../maps/FieldMap'
+import '@testing-library/jest-dom'
+
+
+// Mock Leaflet
+jest.mock('react-leaflet', () => ({
+  MapContainer: ({ children }: any) => <div data-testid="map-container">{children}</div>,
+  TileLayer: () => <div data-testid="tile-layer" />,
+  Polygon: ({ children }: any) => <div data-testid="polygon">{children}</div>,
+  Popup: ({ children }: any) => <div data-testid="popup">{children}</div>,
+}))
+
+
+const mockFields = [
+  {
+    id: '1',
+    name: 'Test Field',
+    crop_type: 'wheat',
+    polygon_coordinates: [[40.7128, -74.0060], [40.7130, -74.0062]],
+    current_health: {
+      health_score: 85,
+      status: 'excellent',
+      ndvi_value: 0.7
+    }
+  }
+]
+
+
+describe('FieldMap', () => {
+  it('renders map with fields', () => {
+    render(<FieldMap fields={mockFields} />)
+    
+    expect(screen.getByTestId('map-container')).toBeInTheDocument()
+    expect(screen.getByTestId('polygon')).toBeInTheDocument()
+    expect(screen.getByText('Test Field')).toBeInTheDocument()
+    expect(screen.getByText('Health Score: 85%')).toBeInTheDocument()
+  })
+  
+  it('displays correct health status colors', () => {
+    const { container } = render(<FieldMap fields={mockFields} />)
+    
+    // Test color logic would go here
+    expect(container).toBeInTheDocument()
+  })
+})
+
+
+________________
+
+
+12. Security & Performance
+12.1 Security Measures
+API Rate Limiting (Django)
+# settings/base.py
+REST_FRAMEWORK = {
+    'DEFAULT_THROTTLE_CLASSES': [
+        'rest_framework.throttling.AnonRateThrottle',
+        'rest_framework.throttling.UserRateThrottle',
+        'apps.core.throttling.NASAAPIThrottle',
+    ],
+    'DEFAULT_THROTTLE_RATES': {
+        'anon': '100/hour',
+        'user': '1000/hour',
+        'nasa_api': '800/hour',  # Respect NASA rate limits
+    }
+}
+
+
+# Custom throttling for NASA API proxy
+class NASAAPIThrottle(UserRateThrottle):
+    scope = 'nasa_api'
+
+
+Input Validation
+# apps/fields/validators.py
+from django.core.exceptions import ValidationError
+from django.contrib.gis.geos import Polygon
+
+
+def validate_field_polygon(polygon):
+    """Validate field polygon coordinates"""
+    if not isinstance(polygon, Polygon):
+        raise ValidationError("Invalid polygon format")
+    
+    # Check polygon area (minimum 0.01 hectares, maximum 10000 hectares)
+    area_sq_meters = polygon.area * 111000 * 111000  # Rough conversion
+    area_hectares = area_sq_meters / 10000
+    
+    if area_hectares < 0.01:
+        raise ValidationError("Field area too small (minimum 0.01 hectares)")
+    
+    if area_hectares > 10000:
+        raise ValidationError("Field area too large (maximum 10000 hectares)")
+
+
+def validate_date_range(start_date, end_date):
+    """Validate date range for data requests"""
+    from datetime import datetime, timedelta
+    
+    if start_date > end_date:
+        raise ValidationError("Start date must be before end date")
+    
+    max_range = timedelta(days=365)
+    if end_date - start_date > max_range:
+        raise ValidationError("Date range cannot exceed 365 days")
+
+
+12.2 Caching Strategy
+Redis Caching Implementation
+# utils/cache_utils.py
+from django.core.cache import cache
+from django.conf import settings
+import hashlib
+import json
+
+
+class CacheManager:
+    @staticmethod
+    def generate_cache_key(prefix: str, **kwargs) -> str:
+        """Generate consistent cache key"""
+        key_data = json.dumps(kwargs, sort_keys=True, default=str)
+        key_hash = hashlib.md5(key_data.encode()).hexdigest()
+        return f"{prefix}:{key_hash}"
+    
+    @staticmethod
+    def cache_nasa_response(api_name: str, params: dict, data: dict, timeout: int = 3600):
+        """Cache NASA API response"""
+        cache_key = CacheManager.generate_cache_key(f"nasa_{api_name}", **params)
+        cache.set(cache_key, data, timeout)
+    
+    @staticmethod
+    def get_cached_nasa_response(api_name: str, params: dict):
+        """Get cached NASA API response"""
+        cache_key = CacheManager.generate_cache_key(f"nasa_{api_name}", **params)
+        return cache.get(cache_key)
+
+
+# Decorator for caching expensive operations
+def cache_result(cache_key_prefix: str, timeout: int = 3600):
+    def decorator(func):
+        def wrapper(*args, **kwargs):
+            cache_key = CacheManager.generate_cache_key(cache_key_prefix, 
+                                                       args=args, kwargs=kwargs)
+            result = cache.get(cache_key)
+            if result is None:
+                result = func(*args, **kwargs)
+                cache.set(cache_key, result, timeout)
+            return result
+        return wrapper
+    return decorator
+
+
+________________
+
+
+13. MVP Features & Roadmap
+13.1 MVP Features (Phase 1 - 2 weeks)
+Core Agricultural Monitoring
+1. Field Management
+
+   * Create and manage farm boundaries using map interface
+   * Define field polygons with crop type and planting dates
+   * Basic field information and metadata storage
+   2. Crop Health Monitoring
+
+      * Real-time NDVI calculation from satellite imagery
+      * Health score computation and trend analysis
+      * Visual health status on interactive maps
+      3. Weather Integration
+
+         * Current weather conditions for each field
+         * 7-day weather forecast using NASA POWER data
+         * Historical weather data visualization
+         4. Basic Alerts
+
+            * Low crop health warnings
+            * Extreme weather alerts (frost, drought, heavy rain)
+            * Email notification system
+            5. Dashboard & Reporting
+
+               * Farm overview with key metrics
+               * Field-by-field health summaries
+               * Basic analytics and trend charts
+13.2 Sprint Planning
+Sprint 1 (Week 1): Foundation & Core Backend
+Easy Tasks:
+               * [ ] Set up Django project structure and basic models
+               * [ ] Implement user authentication and farm management
+               * [ ] Create basic REST API endpoints for farms and fields
+               * [ ] Set up PostgreSQL with PostGIS extension
+Medium Tasks:
+               * [ ] Integrate NASA POWER API for weather data
+               * [ ] Implement basic caching with Redis
+               * [ ] Create field polygon validation and storage
+               * [ ] Set up Celery for background tasks
+Hard Tasks:
+               * [ ] Implement satellite imagery integration (Landsat/MODIS)
+               * [ ] Design and implement NDVI calculation algorithms
+               * [ ] Create robust error handling and retry mechanisms
+Sprint 2 (Week 2): Frontend & User Interface
+Easy Tasks:
+               * [ ] Set up Next.js project with Tailwind CSS
+               * [ ] Create basic navigation and layout components
+               * [ ] Implement farm and field listing pages
+               * [ ] Add responsive design and mobile support
+Medium Tasks:
+               * [ ] Integrate Leaflet maps for field visualization
+               * [ ] Create crop health dashboard with charts
+               * [ ] Implement weather widget with forecast display
+               * [ ] Add form components for field creation/editing
+Hard Tasks:
+               * [ ] Build interactive field polygon drawing tool
+               * [ ] Implement real-time health status visualization on maps
+               * [ ] Create advanced filtering and search functionality
+Sprint 3 (Week 3): Advanced Features
+Easy Tasks:
+               * [ ] Add user preferences and settings
+               * [ ] Implement basic alert system
+               * [ ] Create export functionality for reports
+               * [ ] Add loading states and error boundaries
+Medium Tasks:
+               * [ ] Implement soil moisture monitoring
+               * [ ] Add irrigation recommendation system
+               * [ ] Create disaster monitoring with FIRMS data
+               * [ ] Build notification system (email/SMS)
+Hard Tasks:
+               * [ ] Implement machine learning for yield prediction
+               * [ ] Add advanced analytics and insights
+               * [ ] Create automated report generation
+               * [ ] Implement field comparison and benchmarking
+Sprint 4 (Week 4): Performance & Production
+Easy Tasks:
+               * [ ] Add comprehensive logging and monitoring
+               * [ ] Implement basic SEO optimization
+               * [ ] Create user documentation and help system
+               * [ ] Add data backup and recovery procedures
+Medium Tasks:
+               * [ ] Optimize database queries and add proper indexing
+               * [ ] Implement CDN integration for image assets
+               * [ ] Add comprehensive error tracking with Sentry
+               * [ ] Create deployment automation scripts
+Hard Tasks:
+               * [ ] Implement horizontal scaling capabilities
+               * [ ] Add advanced caching strategies
+               * [ ] Create comprehensive monitoring dashboard
+               * [ ] Implement disaster recovery procedures
+Sprint 5 (Week 5): Enhancement & Scale
+Easy Tasks:
+               * [ ] Add multi-language support
+               * [ ] Implement user feedback system
+               * [ ] Create mobile-responsive improvements
+               * [ ] Add social sharing features
+Medium Tasks:
+               * [ ] Implement advanced user roles and permissions
+               * [ ] Add API versioning and documentation
+               * [ ] Create integration with external farm management systems
+               * [ ] Add advanced data visualization options
+Hard Tasks:
+               * [ ] Implement real-time websocket updates
+               * [ ] Add AI-powered crop disease detection
+               * [ ] Create marketplace for agricultural insights
+               * [ ] Implement blockchain-based crop certification
+________________
+
+
+14. Configuration Files
+14.1 Docker Configuration
+docker-compose.yml
+version: '3.8'
+
+
+services:
+  db:
+    image: postgis/postgis:14-3.2
+    environment:
+      POSTGRES_DB: agrisat
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+
+  backend:
+    build: 
+      context: ./backend
+      dockerfile: Dockerfile
+    environment:
+      - DEBUG=${DEBUG}
+      - SECRET_KEY=${SECRET_KEY}
+      - DATABASE_URL=postgres://postgres:${DB_PASSWORD}@db:5432/agrisat
+      - REDIS_URL=redis://redis:6379/0
+      - NASA_API_KEY=${NASA_API_KEY}
+    volumes:
+      - ./backend:/app
+      - media_volume:/app/media
+    ports:
+      - "8000:8000"
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    command: python manage.py runserver 0.0.0.0:8000
+
+
+  celery:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    environment:
+      - DEBUG=${DEBUG}
+      - SECRET_KEY=${SECRET_KEY}
+      - DATABASE_URL=postgres://postgres:${DB_PASSWORD}@db:5432/agrisat
+      - REDIS_URL=redis://redis:6379/0
+      - NASA_API_KEY=${NASA_API_KEY}
+    volumes:
+      - ./backend:/app
+      - media_volume:/app/media
+    depends_on:
+      - db
+      - redis
+    command: celery -A agrisat worker --loglevel=info
+
+
+  celery-beat:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    environment:
+      - DEBUG=${DEBUG}
+      - SECRET_KEY=${SECRET_KEY}
+      - DATABASE_URL=postgres://postgres:${DB_PASSWORD}@db:5432/agrisat
+      - REDIS_URL=redis://redis:6379/0
+      - NASA_API_KEY=${NASA_API_KEY}
+    volumes:
+      - ./backend:/app
+    depends_on:
+      - db
+      - redis
+    command: celery -A agrisat beat --loglevel=info
+
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    environment:
+      - NEXT_PUBLIC_API_URL=http://localhost:8000
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
+    ports:
+      - "3000:3000"
+    depends_on:
+      - backend
+    command: npm run dev
+
+
+volumes:
+  postgres_data:
+  media_volume:
+
+
+backend/Dockerfile
+FROM python:3.11-slim
+
+
+# Install system dependencies
+RUN apt-get update && apt-get install -y \
+    gdal-bin \
+    libgdal-dev \
+    libpq-dev \
+    gcc \
+    && rm -rf /var/lib/apt/lists/*
+
+
+WORKDIR /app
+
+
+# Install Python dependencies
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+
+# Copy application code
+COPY . .
+
+
+# Set environment variables
+ENV PYTHONPATH=/app
+ENV DJANGO_SETTINGS_MODULE=agrisat.settings.development
+
+
+# Create media directory
+RUN mkdir -p /app/media
+
+
+EXPOSE 8000
+
+
+CMD ["python", "manage.py", "runserver", "0.0.0.0:8000"]
+
+
+frontend/Dockerfile
+FROM node:18-alpine
+
+
+WORKDIR /app
+
+
+# Copy package files
+COPY package*.json ./
+
+
+# Install dependencies
+RUN npm ci
+
+
+# Copy source code
+COPY . .
+
+
+EXPOSE 3000
+
+
+CMD ["npm", "run", "dev"]
+
+
+14.2 Environment Configuration
+.env.example
+# Django Settings
+DEBUG=True
+SECRET_KEY=your-super-secret-key-change-in-production
+ALLOWED_HOSTS=localhost,127.0.0.1
+
+
+# Database
+DB_NAME=agrisat
+DB_USER=postgres
+DB_PASSWORD=your-secure-password
+DB_HOST=db
+DB_PORT=5432
+
+
+# NASA API
+NASA_API_KEY=your-nasa-api-key-here
+
+
+# Redis
+REDIS_URL=redis://redis:6379/0
+
+
+# AWS S3 (Production)
+AWS_ACCESS_KEY_ID=your-aws-access-key
+AWS_SECRET_ACCESS_KEY=your-aws-secret-key
+AWS_STORAGE_BUCKET_NAME=agrisat-media
+AWS_S3_REGION_NAME=us-east-1
+
+
+# Email (for alerts)
+EMAIL_HOST=smtp.gmail.com
+EMAIL_PORT=587
+EMAIL_HOST_USER=your-email@gmail.com
+EMAIL_HOST_PASSWORD=your-app-password
+EMAIL_USE_TLS=True
+
+
+# Frontend
+NEXT_PUBLIC_API_URL=http://localhost:8000
+NEXT_PUBLIC_MAPBOX_TOKEN=your-mapbox-token
+
+
+# Monitoring (Production)
+SENTRY_DSN=your-sentry-dsn
+
+
+________________
+
+
+15. FAQ & Common Pitfalls
+Q: How do I handle NASA API rate limits?
+A: Implement server-side caching and respect rate limits:
+# Use exponential backoff for retries
+import time
+import random
+
+
+def nasa_api_with_backoff(func, max_retries=3):
+    for attempt in range(max_retries):
+        try:
+            return func()
+        except requests.HTTPError as e:
+            if e.response.status_code == 429:  # Rate limited
+                wait_time = (2 ** attempt) + random.uniform(0, 1)
+                time.sleep(wait_time)
+                continue
+            raise
+    raise Exception("Max retries exceeded")
+
+
+Q: How do I handle large satellite imagery files?
+A: Use chunked processing and thumbnail generation:
+# Generate thumbnails for large images
+from PIL import Image
+import io
+
+
+def create_thumbnail(image_data, max_size=(300, 300)):
+    img = Image.open(io.BytesIO(image_data))
+    img.thumbnail(max_size, Image.Resampling.LANCZOS)
+    
+    thumb_io = io.BytesIO()
+    img.save(thumb_io, format='JPEG', quality=85)
+    return thumb_io.getvalue()
+
+
+Q: How do I handle coordinate system conversions?
+A: Use Django's GIS capabilities:
+from django.contrib.gis.geos import Point
+from django.contrib.gis.db.models.functions import Transform
+
+
+# Convert between coordinate systems
+point_4326 = Point(longitude, latitude, srid=4326)  # WGS84
+point_3857 = point_4326.transform(3857, clone=True)  # Web Mercator
+
+
+Q: How do I optimize database queries for large datasets?
+A: Use proper indexing and query optimization:
+# Add database indexes for common queries
+class Meta:
+    indexes = [
+        models.Index(fields=['field', 'measured_at']),
+        models.Index(fields=['status', 'measured_at']),
+        # Spatial index for geographic queries
+        models.Index(fields=['polygon_coordinates']),
+    ]
+
+
+# Use select_related and prefetch_related
+fields = Field.objects.select_related('farm').prefetch_related(
+    'health_data__field'
+).filter(farm__owner=user)
+
+
+Common Deployment Issues
+               1. CORS Configuration: Ensure proper CORS settings for frontend-backend communication
+               2. Static Files: Configure static file serving for production (use CDN)
+               3. Database Migrations: Always run migrations in production deployment pipeline
+               4. Environment Variables: Never commit sensitive data to version control
+               5. SSL/HTTPS: Always use HTTPS in production for API endpoints
+               6. Memory Management: Monitor memory usage with large satellite datasets
+________________
+
+
+16. Resources & References
+NASA API Documentation
+               * NASA Open Data Portal
+               * NASA POWER API Documentation
+               * Earth Imagery API
+               * MODIS Data Products
+               * Landsat Science Products
+Agricultural Data Sources
+               * USDA Crop Data Layer
+               * FAO Global Information and Early Warning System
+               * Copernicus Agriculture Monitoring
+Technical Resources
+               * Django REST Framework Documentation
+               * Next.js Documentation
+               * PostGIS Documentation
+               * Celery Documentation
+Sample API Responses
+NASA POWER Weather Response
+{
+  "type": "Feature",
+  "geometry": {
+    "type": "Point",
+    "coordinates": [-74.0060, 40.7128]
+  },
+  "properties": {
+    "parameter": {
+      "T2M_MIN": {
+        "20241201": 15.5,
+        "20241202": 12.3,
+        "20241203": 18.1
+      },
+      "T2M_MAX": {
+        "20241201": 25.3,
+        "20241202": 22.1,
+        "20241203": 28.5
+      },
+      "PRECTOTCORR": {
+        "20241201": 2.1,
+        "20241202": 0.0,
+        "20241203": 5.3
+      }
+    }
+  }
+}
+
+
+cURL Examples
+Get Field Health Data
+curl -X GET "http://localhost:8000/api/fields/123e4567-e89b-12d3-a456-426614174000/health/" \
+     -H "Authorization: Token your-api-token" \
+     -H "Content-Type: application/json"
+
+
+Get Weather Forecast
+curl -X GET "http://localhost:8000/api/fields/123e4567-e89b-12d3-a456-426614174000/weather/?start=2024-12-01&end=2024-12-07" \
+     -H "Authorization: Token your-api-token" \
+     -H "Content-Type: application/json"
+
+
+Create New Field
+curl -X POST "http://localhost:8000/api/fields/" \
+     -H "Authorization: Token your-api-token" \
+     -H "Content-Type: application/json" \
+     -d '{
+       "name": "North Field",
+       "crop_type": "wheat",
+       "area_hectares": 25.5,
+       "polygon_coordinates": "POLYGON((-74.0060 40.7128, -74.0050 40.7128, -74.0050 40.7138, -74.0060 40.7138, -74.0060 40.7128))",
+       "planting_date": "2024-10-15",
+       "expected_harvest": "2025-07-01"
+     }'
+
+
+Production Deployment Checklist
+Pre-Deployment
+               * [ ] Set DEBUG=False in production settings
+               * [ ] Configure secure SECRET_KEY (use environment variable)
+               * [ ] Set up SSL/TLS certificates
+               * [ ] Configure AWS S3 for media file storage
+               * [ ] Set up proper database backups
+               * [ ] Configure email service for alerts
+               * [ ] Set up monitoring and logging (Sentry, CloudWatch)
+Deployment Steps
+               * [ ] Build and push Docker images to registry
+               * [ ] Run database migrations: python manage.py migrate
+               * [ ] Collect static files: python manage.py collectstatic --noinput
+               * [ ] Start application servers (Django, Celery workers)
+               * [ ] Configure reverse proxy (Nginx) with SSL
+               * [ ] Set up health checks and monitoring
+               * [ ] Test all API endpoints and frontend functionality
+Post-Deployment
+               * [ ] Monitor application performance and errors
+               * [ ] Set up automated backups
+               * [ ] Configure log rotation and retention
+               * [ ] Test disaster recovery procedures
+               * [ ] Monitor NASA API usage and costs
+________________
+
+
+Advanced Features for Future Development
+AI/ML Enhancements
+               * Crop Disease Detection: Use computer vision to identify plant diseases from satellite/drone imagery
+               * Yield Prediction: Machine learning models using historical weather, soil, and satellite data
+               * Pest Outbreak Prediction: Early warning systems using environmental conditions
+               * Optimal Planting Recommendations: AI-driven planting date and crop selection
+Integration Opportunities
+               * IoT Sensors: Integrate ground-based soil moisture, temperature sensors
+               * Drone Imagery: Process high-resolution drone imagery for detailed field analysis
+               * Farm Equipment: Connect with tractors and irrigation systems for automated responses
+               * Market Data: Integrate commodity prices for economic optimization
+Mobile Applications
+               * Field Inspection App: Mobile app for farmers to record field observations
+               * Offline Capability: Sync data when connectivity is restored
+               * Push Notifications: Real-time alerts for critical conditions
+               * Voice Interface: Voice commands for hands-free operation
+This comprehensive technical document provides everything needed to build a production-ready agricultural monitoring platform using NASA's powerful Earth observation data and APIs. The modular architecture allows for iterative development while the robust backend ensures scalability for real-world agricultural operations.
+Remember to:
+               1. Start with the MVP features to validate the concept
+               2. Focus on user experience and actionable insights
+               3. Respect NASA API rate limits and implement proper caching
+               4. Plan for scale from day one with proper database design
+               5. Implement comprehensive testing for reliability
+Good luck with your NASA Space Apps Challenge! This platform has the potential to make a real impact on agricultural productivity and sustainability.
